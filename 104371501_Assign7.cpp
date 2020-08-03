@@ -187,6 +187,46 @@ class Cache {
 #endif
             m_misses++;
 
+            // get LRU item
+            if (m_associativity == 1){
+#ifdef DEBUG
+                cout << "Associativity is 1 so replacing only possible cache value. Will write back to memory first." << endl;
+#endif            
+                // add new item in it's place
+                for (it=cache.begin(); it != cache.end(); it++) {
+                    int cache_index =     std::get<0>(*it);
+                    if (cache_index == index) {
+                
+                        bool valid = std::get<2>(*it);
+                        bool dirty = std::get<3>(*it);
+                        if (valid && dirty) {
+                            // write back to memory first
+                            m_total_cycles += m_write_back_cost;
+                            m_write_backs++;
+                        }
+                        // remove it from cache
+                        cache.erase(it);
+
+                        dirty = true;
+                        valid = true;
+                        // add item to cache as valid and dirty 
+#ifdef DEBUG
+                        cout << "Adding item to cache." << endl;
+#endif
+                        cache.insert(it, std::tuple<int,int,bool,bool,int>(index,tag,valid,dirty,count));
+                        break;
+                    }
+                }
+
+            //}
+
+
+
+
+            }
+            else {
+
+            
 
             // get LRU item
             it = getLRU();
@@ -214,6 +254,7 @@ class Cache {
             cout << "Adding item to cache." << endl;
 #endif
             cache.insert(it, std::tuple<int,int,bool,bool,int>(index,tag,valid,dirty,count));
+            }
         }
 
         void get(int address, int count) {
@@ -277,6 +318,44 @@ class Cache {
             m_total_cycles += m_miss_cost_read;
 
             // get LRU item
+            if (m_associativity == 1){
+#ifdef DEBUG
+                cout << "Associativity is 1 so replacing only possible cache value. Will write back to memory first." << endl;
+#endif            
+                // add new item in it's place
+                for (it=cache.begin(); it != cache.end(); it++) {
+                    int cache_index =     std::get<0>(*it);
+                    if (cache_index == index) {
+                
+                        bool valid = std::get<2>(*it);
+                        bool dirty = std::get<3>(*it);
+                        if (valid && dirty) {
+                            // write back to memory first
+                            m_total_cycles += m_write_back_cost;
+                            m_write_backs++;
+                        }
+                        // remove it from cache
+                        cache.erase(it);
+
+                        dirty = true;
+                        valid = true;
+                        // add item to cache as valid and dirty 
+#ifdef DEBUG
+                        cout << "Adding item to cache." << endl;
+#endif
+                        cache.insert(it, std::tuple<int,int,bool,bool,int>(index,tag,valid,dirty,count));
+                        break;
+                    }
+                }
+
+            //}
+
+
+
+
+            }
+            else {
+
             it = getLRU();
             //cout << "m_rows: " << m_rows << " cache_size: " << cache.size() << endl;
             //if (cache.size() == m_rows) {
@@ -302,7 +381,7 @@ class Cache {
             cout << "Adding item to cache." << endl;
 #endif
             cache.insert(it, std::tuple<int,int,bool,bool,int>(index,tag,valid,dirty,count));
-            
+            }            
         }
 
         void print() {
