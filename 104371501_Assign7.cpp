@@ -38,35 +38,38 @@ class Cache {
         std::vector<CacheLine>::iterator it;        // couple of iterators for 2D array
         std::vector<CacheLine>::iterator it2;
         
-        int m_ram_size{0};                          // size of ram
-        int m_rows{0};                              // number of rows in a set
+        double m_ram_size{0};                       // size of ram
+        double m_rows{0};                           // number of rows in a set
 
-        unsigned m_offsetbits{2};                   // offset bits (always 2)
-        unsigned m_indexbits{0};                    // index bits (combined row and block bits)
-        unsigned m_associativity{0};                // level of associativity
-        unsigned m_tagbits{0};                      // tag bits (32 - index bits - offset bits)
+        unsigned m_offsetbits{2};                        // offset bits (always 2)
+        unsigned m_indexbits{0};                         // index bits (combined row and block bits)
+        unsigned m_associativity{0};                     // level of associativity
+        unsigned m_tagbits{0};                           // tag bits (32 - index bits - offset bits)
 
-        unsigned m_hit_cost{0};                     // cycle cost of read/write cache hit
-        unsigned m_miss_cost_read{0};               // cycle cost of read cache miss
-        unsigned m_write_back_cost{0};              // cycle cost of writing cache line to memory
+        double m_hit_cost{0.0};                      // cycle cost of read/write cache hit
+        double m_miss_cost_read{0};                 // cycle cost of read cache miss
+        double m_write_back_cost{0};                // cycle cost of writing cache line to memory
 
-        unsigned m_total_cycles{0};                 // running sum of total cycles
-        unsigned m_hits{0};                         // running sum of number of cache hits
-        unsigned m_misses{0};                       // running sum of number of cache misses
-        unsigned m_write_backs{0};                  // running sum of number of write backs to memory
+        double m_total_cycles{0.0};                 // running sum of total cycles
+        double m_hits{0};                           // running sum of number of cache hits
+        double m_misses{0};                         // running sum of number of cache misses
+        double m_write_backs{0};                    // running sum of number of write backs to memory
 
     public:
         Cache(unsigned blockbits, unsigned rowbits, unsigned associativity, unsigned tagbits) 
         :   m_indexbits         {blockbits + rowbits},
             m_associativity     {associativity},
             m_tagbits           {tagbits},
-            m_ram_size          {(int)(pow(2,rowbits) * (tagbits + 2 + pow(2,blockbits) * 32) * associativity)},
-            m_rows              {(int)(pow(2,blockbits + rowbits))},
-            m_miss_cost_read    {(unsigned)(20 + pow(2,blockbits))},
-            m_write_back_cost   {(unsigned)(1 + pow(2,blockbits))}
+            m_ram_size          {(pow(2,rowbits) * (tagbits + 2 + pow(2,blockbits) * 32) * associativity)},
+            m_rows              {(pow(2,blockbits + rowbits))},
+            m_miss_cost_read    {(20 + pow(2,blockbits))},
+            m_write_back_cost   {(1 + pow(2,blockbits))}
         { 
             // set hit cost based on associativity level
-            if (m_associativity == 1) m_hit_cost = 1 + rowbits / 2; else m_hit_cost = 1 + rowbits / 2 + cbrt(m_associativity);
+            if (m_associativity == 1) 
+                m_hit_cost = 1.0 + rowbits / 2.0; 
+            else 
+                m_hit_cost = 1.0 + rowbits / 2.0 + log2(m_associativity);
 
             // initialize cache with empty cache lines
             CacheLine line;
@@ -187,7 +190,21 @@ class Cache {
         unsigned hits()         { return m_hits; }
         unsigned misses()       { return m_misses; }
         unsigned write_backs()  { return m_write_backs; }
+
+        void print() {
+                cout << "m_ram_size " << m_ram_size << endl;
+                cout << "m_rows " << m_rows << endl;
+                cout << "m_offsetbits " << m_offsetbits << endl;
+                cout << "m_indexbits " << m_indexbits << endl;
+                cout << "m_associativity " << m_associativity << endl;
+                cout << "m_tagbits " << m_tagbits << endl;
+                cout << "m_hit_cost " << m_hit_cost << endl;
+                cout << "m_miss_cost_read " << m_miss_cost_read << endl;
+                cout << "m_write_back_cost " << m_write_back_cost << endl;
+        }
 };
+
+
 
 int main() {
 
@@ -196,7 +213,7 @@ int main() {
     //files.insert(std::pair<string,std::tuple<int,int,int>>("quick4k.txt", std::make_tuple(8,0,1)));
     //files.insert(std::pair<string,std::tuple<int,int,int>>("quick16k.txt", std::make_tuple(6,0,2)));
     //files.insert(std::pair<string,std::tuple<int,int,int>>("quick64k.txt", std::make_tuple(4,0,4)));
-    files.insert(std::pair<string,std::tuple<int,int,int>>("quick256k.txt", std::make_tuple(10,0,8)));
+    //files.insert(std::pair<string,std::tuple<int,int,int>>("quick256k.txt", std::make_tuple(10,0,8)));
     //files.insert(std::pair<string,std::tuple<int,int,int>>("quick1M.txt", std::make_tuple(8,0,1)));
     //files.insert(std::pair<string,std::tuple<int,int,int>>("random4k.txt", std::make_tuple(2,0,16)));
     //files.insert(std::pair<string,std::tuple<int,int,int>>("random16k.txt", std::make_tuple(7,1,1)));
@@ -204,65 +221,76 @@ int main() {
     //files.insert(std::pair<string,std::tuple<int,int,int>>("random256k.txt", std::make_tuple(3,3,1)));
     //files.insert(std::pair<string,std::tuple<int,int,int>>("random1M.txt", std::make_tuple(8,0,1)));
 
-    // quick4k
-
+    std::vector<string> mat_name = {"quick4k.txt","quick16k.txt","quick64k.txt","quick256k.txt","quick1M.txt","random4k.txt","random16k.txt","random64k.txt","random256k.txt","random1M.txt"};
+    std::vector<unsigned> associativity = {1,2,4,8,16};
+    std::vector<unsigned> rowbits = {1,2,3,5,6,7,8,9,10,11,12};
+    std::vector<unsigned> blockbits = {0,1,2,3,4};
 
     // iterate through all test files and parameters
-    for (std::map<string,std::tuple<int,int,int>>::iterator it = files.begin(); it != files.end(); it++) {
+    //for (std::map<string,std::tuple<int,int,int>>::iterator it = files.begin(); it != files.end(); it++) {
+    
+    // iterate through files 
+    for (std::vector<unsigned>::iterator l = mat_name.begin(); l != mat_name.end(); l++) {
+        // iterate through associativty 
+        for (std::vector<unsigned>::iterator i = associativity.begin(); i != associativity.end(); i++) {
+            // iterate through rowbits 
+            for (std::vector<unsigned>::iterator j = rowbits.begin(); j != rowbits.end(); j++) {  
+                // iterate through blockbits 
+                for (std::vector<unsigned>::iterator k = blockbits.begin(); k != blockbits.end(); k++) {
+
+                    // time each iteration
+                    const clock_t begin_time = clock();
+
+                    // open file
+                    ifstream file;
+                    //string mat_name = it->first;
+                    file.open(*l);
+
+                    // setup cache with parameters
+                    //unsigned rowbits = std::get<0>(it->second);
+                    //unsigned blockbits = std::get<1>(it->second);
+                    //unsigned associativity = std::get<2>(it->second);
+                    unsigned rowbits = *j;
+                    unsigned blockbits = *k;
+                    unsigned associativity = *i;
+                    unsigned tagbits = 32 - rowbits - blockbits - 2;
+                    Cache cache(blockbits, rowbits, associativity, tagbits);
+
+                    // read file, line by line loading and updating cache
+                    unsigned line_count = 256;
+                    if (file.is_open()) {
+                        string read_write;
+                        while (file >> read_write) {
+                            int address;
+                            file >> address;
+
+                            if (read_write == "W")
+                                cache.update(address, line_count, true);
+                            else
+                                cache.update(address, line_count, false);
+                            line_count++;  
+                        }
+                    }
+                    else {
+                        cout << "Unable to open " << mat_name << endl;
+                    }
+                    cache.flush();
+
+                    // output results 
+                    cout << "********************" << endl;
+                    cout << "MAT NAME: " << mat_name << endl;
+                    cout << "ROWBITS: " << rowbits << endl;
+                    cout << "BLOCKBITS: " << blockbits << endl;
+                    cout << "ASSOCIATIVITY: " << associativity << endl;
+                    cout << "TOTAL CYCLES: " << cache.cycles() << endl;
+                    cout << "RAM SIZE: " << cache.size() << endl;
+                    cout << "HITS: " << cache.hits() << endl;
+                    cout << "MISSES: " << cache.misses() << endl;
+                    cout << "WRITE BACKS: " << cache.write_backs() << endl;
+                    cout << "TIME: " << float(clock()-begin_time) / CLOCKS_PER_SEC << " sec" << endl;
         
-        // time each iteration
-        const clock_t begin_time = clock();
-
-        // open file
-        ifstream file;
-        string mat_name = it->first;
-        file.open(mat_name);
-
-        // setup cache with parameters
-        unsigned rowbits = std::get<0>(it->second);
-        unsigned blockbits = std::get<1>(it->second);
-        unsigned associativity = std::get<2>(it->second);
-        unsigned tagbits = 32 - rowbits - blockbits - 2;
-        Cache cache(blockbits, rowbits, associativity, tagbits);
-
-        // read file, line by line loading and updating cache
-        unsigned line_count = 256;
-        if (file.is_open()) {
-            string read_write;
-            while (file >> read_write) {
-                int address;
-                file >> address;
-
-                if (read_write == "W")
-                    cache.update(address, line_count, true);
-                else
-                    cache.update(address, line_count, false);
-                line_count++;  
+                }
             }
         }
-        else {
-            cout << "Unable to open " << mat_name << endl;
-        }
-        cache.flush();
-
-    // output results 
-    cout << "********************" << endl;
-    cout << "MAT NAME: " << mat_name << endl;
-    cout << "ROWBITS: " << rowbits << endl;
-    cout << "BLOCKBITS: " << blockbits << endl;
-    cout << "ASSOCIATIVITY: " << associativity << endl;
-    cout << "TOTAL CYCLES: " << cache.cycles() << endl;
-    cout << "RAM SIZE: " << cache.size() << endl;
-    cout << "HITS: " << cache.hits() << endl;
-    cout << "MISSES: " << cache.misses() << endl;
-    cout << "WRITE BACKS: " << cache.write_backs() << endl;
-    cout << "TIME: " << float(clock()-begin_time) / CLOCKS_PER_SEC << " sec" << endl;
-    
     }
-
-
-    
-
-
-
 }
