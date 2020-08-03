@@ -24,10 +24,6 @@ parameters:
 #include <map>
 using namespace std;
 
-#define M 32
-
-//#define DEBUG
-
 struct CacheLine {
     int index;
     int tag;
@@ -38,67 +34,41 @@ struct CacheLine {
 
 class Cache {
     private:
-        std::vector<std::vector<CacheLine>> cache;
-        std::vector<CacheLine>::iterator it;
+        std::vector<std::vector<CacheLine>> cache;  // 2D array of cache lines (rows x sets)
+        std::vector<CacheLine>::iterator it;        // couple of iterators for 2D array
         std::vector<CacheLine>::iterator it2;
-        int m_ram_size;
-        int m_rows;
+        
+        int m_ram_size{0};                          // size of ram
+        int m_rows{0};                              // number of rows in a set
 
-        unsigned m_offsetbits;
-        unsigned m_indexbits;
-        unsigned m_associativity;
-        unsigned m_tagbits;
+        unsigned m_offsetbits{2};                   // offset bits (always 2)
+        unsigned m_indexbits{0};                    // index bits (combined row and block bits)
+        unsigned m_associativity{0};                // level of associativity
+        unsigned m_tagbits{0};                      // tag bits (32 - index bits - offset bits)
 
-        unsigned m_hit_cost;
-        unsigned m_miss_cost_read;
-        unsigned m_write_back_cost;
+        unsigned m_hit_cost{0};                     // cycle cost of read/write cache hit
+        unsigned m_miss_cost_read{0};               // cycle cost of read cache miss
+        unsigned m_write_back_cost{0};              // cycle cost of writing cache line to memory
 
-        unsigned m_total_cycles{0};
-        unsigned m_hits{0};
-        unsigned m_misses{0};
-        unsigned m_write_backs{0};
-
-        int m_indexbits_mask;
-        int m_tagbits_mask;
-
-        int m_total_1{0};
-        int m_total_2{0};
-        int m_total_3{0};
-        int m_total_4{0};
-        int m_total_5{0};
-        int m_total_6{0};
-        int m_total_7{0};
-        int m_total_8{0};
-        int m_total_9{0};
+        unsigned m_total_cycles{0};                 // running sum of total cycles
+        unsigned m_hits{0};                         // running sum of number of cache hits
+        unsigned m_misses{0};                       // running sum of number of cache misses
+        unsigned m_write_backs{0};                  // running sum of number of write backs to memory
 
     public:
-        Cache(int bit_number, unsigned offsetbits, unsigned blockbits, unsigned rowbits, unsigned associativity, unsigned tagbits) { 
+        Cache(unsigned blockbits, unsigned rowbits, unsigned associativity, unsigned tagbits) 
+        :   m_indexbits         {blockbits + rowbits},
+            m_associativity     {associativity},
+            m_tagbits           {tagbits},
+            m_ram_size          {(int)(pow(2,rowbits) * (tagbits + 2 + pow(2,blockbits) * 32) * associativity)},
+            m_rows              {(int)(pow(2,blockbits + rowbits))},
+            m_miss_cost_read    {(unsigned)(20 + pow(2,blockbits))},
+            m_write_back_cost   {(unsigned)(1 + pow(2,blockbits))}
+        { 
+            // set hit cost based on associativity level
+            if (m_associativity == 1) m_hit_cost = 1 + rowbits / 2; else m_hit_cost = 1 + rowbits / 2 + cbrt(m_associativity);
 
-            m_offsetbits = offsetbits;
-            m_indexbits = blockbits + rowbits;
-            m_associativity = associativity;
-            m_tagbits = tagbits;
-            m_ram_size = pow(2,rowbits) * (m_tagbits + 2 + pow(2,blockbits) * 32) * m_associativity;  
-            m_rows = pow(2,m_indexbits);
-
-            if (m_associativity == 1)
-                m_hit_cost = 1 + rowbits / 2;
-            else
-                m_hit_cost = 1 + rowbits / 2 + cbrt(m_associativity);
-
-            // address decode for DRAM + transfer cycles as datapath to DRAM in system is only 32 bits
-            m_miss_cost_read = 20 + pow(2,blockbits);
-
-            // cost when cache line is dirty needs to be replaced
-            // 1 (for address transfer) + 2^blockbits (data transfer to DRAM before cache entry available for use again)
-            m_write_back_cost = 1 + pow(2,blockbits);
-        
-            int m_offsetbits_mask = (int)(pow(2,m_offsetbits) - 1);
-            int m_blockbits_mask = (int)(pow(2,blockbits) - 1);
-            int m_rowbits_mask = (int)(pow(2,rowbits) - 1);
-            int m_tagbits_mask = (int)(pow(2,m_tagbits) - 1);
-
-            // initialize
+            // initialize cache with empty cache lines
             CacheLine line;
             for (int j=0; j < m_associativity; j++) {
                 cache.push_back(std::vector<CacheLine>());
@@ -113,26 +83,21 @@ class Cache {
             }
         }
 
+        /* when done, make sure to flush cache by writing all dirty data to memory */
         void flush() {
             CacheLine line;
-            // flush out dirty cache lines at the end
             for (int j=0; j < m_associativity; j++) {
                 for (it = cache.at(j).begin(); it != cache.at(j).end(); it++) {
                     if (it->dirty) {
+                        // write dirty data back to memory
                         m_write_backs++;
-                        cache.at(j).erase(it);
-                        
-                        line.count = 0;
-                        line.dirty = true;
-                        line.index = 0;
-                        line.valid = false;
-                        line.tag = 0;
-                        cache.at(j).insert(it, line);
+                        m_total_cycles += m_write_back_cost;
                     }
                 }
             }
         }
 
+        /* get the oldest data for index, returns set oldest data is in and iterator to that set */
         std::pair<int,std::vector<CacheLine>::iterator> getLRU(int index) {
             int lowest_count = INT_MAX;
             int set;
@@ -140,63 +105,62 @@ class Cache {
                 for (it = cache.at(j).begin(); it != cache.at(j).end(); it++) {
                     if (it->index == index) {
                         if (it->count < lowest_count) {
+                            // set values when oldest data is found
                             it2 = it;
                             lowest_count = it->count;
                             set = j;
                         }
-                        //cout << "lowest_count: " << lowest_count << " item count: " << std::get<4>(*it) << endl;
                     }
                 }
             }
-#ifdef DEBUG
-            cout << "Oldest item in cache is at index: " << std::get<0>(*it2) << endl;
-#endif
             return std::pair<int,std::vector<CacheLine>::iterator>(set,it2);
         }
 
+        /* main cache function called on every read/write */
         void update(int address, int count, bool write) {
 
+            // remove lower offset bits
             address = (address >> m_offsetbits);
 
+            // get index value
             int index = (address & ((int)(pow(2,m_indexbits) - 1)));
             address = (address >> (m_indexbits));
 
+            // whatever is left is the tag
             int tag = address;
 
+            // iterate through cache to try to find data and cache hit
             for (int j=0; j < m_associativity; j++) {    
                 for (it=cache.at(j).begin(); it != cache.at(j).end(); it++) {
                     if (it->index == index && it->tag == tag && it->valid) {
-#ifdef DEBUG
-                        cout << "Already stored in cache. Update as recently used value." << endl;
-#endif
+                        // if find correct data and it's valid, we have a cache hit
                         m_total_cycles += m_hit_cost;
                         m_hits++;
 
-                        // move it to front, or most recently used
+                        // set data as most recently used
                         it->count = count;
+
+                        // if we are writing, data know has become dirty
                         if (write)
                             it->dirty = true; 
                         return;
                     }
                 }
             }
-#ifdef DEBUG
-            cout << "Item not in cache" << endl;
-#endif
+
+            // even we didn't find data in cache, we have a cache miss
             m_misses++;
 
+            // get the oldest data in the cache that we will replace with data we want
             std::pair<int,std::vector<CacheLine>::iterator> lru = getLRU(index);
 
+            // if data is dirty and valid, make sure to write back to memory before deleting from cache
             if (lru.second->dirty && lru.second->valid && lru.second->tag != tag) {
-                // write back to memory first
                 m_total_cycles += m_write_back_cost;
                 m_write_backs++;
             }
 
-            if (lru.second->dirty) m_total_1++;
-            if (lru.second->valid) m_total_2++;
-            if (write) m_total_3++;
-
+            // setup new cache line to insert
             CacheLine line;
             line.count = count;
             if (write)
@@ -207,49 +171,15 @@ class Cache {
             line.tag = tag;
             line.valid = true;
 
-            // remove it from cache
+            // replace oldest data in cache with latest accessed data
             cache.at(lru.first).erase(lru.second);
-            // add item to cache as valid and dirty 
-#ifdef DEBUG
-            cout << "Adding item to cache." << endl;
-#endif
-
             cache.at(lru.first).insert(lru.second, line);
  
+            // write miss has same cost as a hit
             if (write)
                 m_total_cycles += m_hit_cost;
             else
                 m_total_cycles += m_miss_cost_read;
-        }
-
-        void print() {
-            int i;
-//#ifdef DEBUG 
-            cout << "Current Cache:" << endl;
-//#endif
-            for (int j=0; j < m_associativity; j++) {    
-                cout << "SET " << j << endl;
-                for (it=cache.at(j).begin(); it != cache.at(j).end(); it++) {
-//#ifdef DEBUG 
-                    cout << "Index:" << it->index << " tag:" << it->tag << " valid: " << it->valid << " dirty: " << it->dirty << " count: " << it->count << endl;
-//#endif        
-                }
-            }
-//#ifdef DEBUG
-            cout << "\n";
-//#endif
-        }
-
-        void printSize() {
-#ifdef DEBUG
-            cout << "Cache size:" << cache.size() << endl;
-#endif
-        }
-
-        void printTotals() {
-            cout << "Total1: " << m_total_1 << endl;
-            cout << "Total2: " << m_total_2 << endl;
-            cout << "Total3: " << m_total_3 << endl;
         }
 
         unsigned cycles()       { return m_total_cycles; }
@@ -260,45 +190,62 @@ class Cache {
 };
 
 int main() {
-    // open file
-    ifstream quick4k;
-    string mat_name = "quick16k.txt";
-    quick4k.open(mat_name);
-    
-    // setup cache with parameters
-    unsigned offsetbits = 2;
-    unsigned rowbits = 6;
-    unsigned blockbits = 0;
-    unsigned associativity = 2;
-    unsigned tagbits = M - rowbits - blockbits - offsetbits;
-    Cache cache(M, offsetbits, blockbits, rowbits, associativity, tagbits);
 
-    unsigned line_count = 256;
-    if (quick4k.is_open()) {
-        string read_write;
-        int address;
-        while (quick4k >> read_write) {
-            quick4k >> address;
+    std::map<string,std::tuple<int,int,int>> files;
+    // lab manual testing files/parameters
+    //files.insert(std::pair<string,std::tuple<int,int,int>>("quick4k.txt", std::make_tuple(8,0,1)));
+    //files.insert(std::pair<string,std::tuple<int,int,int>>("quick16k.txt", std::make_tuple(6,0,2)));
+    //files.insert(std::pair<string,std::tuple<int,int,int>>("quick64k.txt", std::make_tuple(4,0,4)));
+    files.insert(std::pair<string,std::tuple<int,int,int>>("quick256k.txt", std::make_tuple(10,0,8)));
+    //files.insert(std::pair<string,std::tuple<int,int,int>>("quick1M.txt", std::make_tuple(8,0,1)));
+    //files.insert(std::pair<string,std::tuple<int,int,int>>("random4k.txt", std::make_tuple(2,0,16)));
+    //files.insert(std::pair<string,std::tuple<int,int,int>>("random16k.txt", std::make_tuple(7,1,1)));
+    //files.insert(std::pair<string,std::tuple<int,int,int>>("random64k.txt", std::make_tuple(5,2,1)));
+    //files.insert(std::pair<string,std::tuple<int,int,int>>("random256k.txt", std::make_tuple(3,3,1)));
+    //files.insert(std::pair<string,std::tuple<int,int,int>>("random1M.txt", std::make_tuple(8,0,1)));
 
-            //if (257 == line_count)
-            //   break;
+    // quick4k
 
-            if (read_write == "W")
-                cache.update(address, line_count, true);
-            else
-                cache.update(address, line_count, false);
-            line_count++;  
-            ///cache.print();          
+
+    // iterate through all test files and parameters
+    for (std::map<string,std::tuple<int,int,int>>::iterator it = files.begin(); it != files.end(); it++) {
+        
+        // time each iteration
+        const clock_t begin_time = clock();
+
+        // open file
+        ifstream file;
+        string mat_name = it->first;
+        file.open(mat_name);
+
+        // setup cache with parameters
+        unsigned rowbits = std::get<0>(it->second);
+        unsigned blockbits = std::get<1>(it->second);
+        unsigned associativity = std::get<2>(it->second);
+        unsigned tagbits = 32 - rowbits - blockbits - 2;
+        Cache cache(blockbits, rowbits, associativity, tagbits);
+
+        // read file, line by line loading and updating cache
+        unsigned line_count = 256;
+        if (file.is_open()) {
+            string read_write;
+            while (file >> read_write) {
+                int address;
+                file >> address;
+
+                if (read_write == "W")
+                    cache.update(address, line_count, true);
+                else
+                    cache.update(address, line_count, false);
+                line_count++;  
+            }
         }
-    }
-    else {
-        cout << "Unable to open " << mat_name << endl;
-    }
-    cache.print();
-    cache.flush();
-    cache.printTotals();
+        else {
+            cout << "Unable to open " << mat_name << endl;
+        }
+        cache.flush();
 
-    /* output */
+    // output results 
     cout << "********************" << endl;
     cout << "MAT NAME: " << mat_name << endl;
     cout << "ROWBITS: " << rowbits << endl;
@@ -309,4 +256,13 @@ int main() {
     cout << "HITS: " << cache.hits() << endl;
     cout << "MISSES: " << cache.misses() << endl;
     cout << "WRITE BACKS: " << cache.write_backs() << endl;
+    cout << "TIME: " << float(clock()-begin_time) / CLOCKS_PER_SEC << " sec" << endl;
+    
+    }
+
+
+    
+
+
+
 }
