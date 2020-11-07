@@ -2,6 +2,7 @@
 
 /* One-Level Cache */
 
+
 /* CACHE
 parameters:
 1) tagbits          (derived by subtracting first 3 parameters by 32)
